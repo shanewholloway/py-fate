@@ -9,9 +9,12 @@
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~##
 
 import unittest, os, sys
+sys.path.insert(0, os.path.join(__file__, '../..'))
+import fate
 
 class TestFate(unittest.TestCase):
     def testFate(self):
+        print fate
         pass
 
 if __name__=='__main__':
