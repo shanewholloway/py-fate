@@ -16,16 +16,10 @@ class PromiseApi(object):
     def done(self, success): return self.then(success, None)
 
 def isPromise(tgt):
-    if tgt is None: return False
-    return (getattr(tgt, 'isPromise', bool)() or 
-        callable(getattr(tgt, 'then', None)))
-PromiseApi.isPromise = isPromise # dual static and normal method
-def isFuture(tgt):
-    if tgt is None: return False
-    return (getattr(tgt, 'isFuture', bool)() or 
-        callable(getattr(tgt, 'resolve', None)) or
-        callable(getattr(tgt, 'reject', None)))
-PromiseApi.isFuture = isFuture # dual static and normal method
+    return (tgt is not None and
+        getattr(tgt, 'promise', None) is not None and
+        callable(getattr(tgt.promise, 'then', None)))
+PromiseApi.isPromise = isPromise
 
 class Promise(PromiseApi):
     def __init__(self, then):
@@ -33,10 +27,11 @@ class Promise(PromiseApi):
     promise = property(lambda self: self)
     state = property(lambda self: self.then.state)
 
-    @classmethod
-    def wrap(klass, tgt):
-        if klass.isPromise(tgt): return tgt
-        return klass._valueAsPromise(tgt)
+def asPromise(tgt):
+    if tgt is None or getattr(klass,'promise',None) is None:
+        tgt = Future.resolved(tgt)
+    return tgt.promise
+Promise.wrap = staticmethod(asPromise)
 
 def when(klass, tgt, success=None, failure=None):
     if success is None and failure is None:
@@ -65,8 +60,8 @@ Future.absentTail = Future(None)
 #~ Future: thenable, deferred, resolved and rejected ~~~~~~~
 
 def thenable(klass, success=None, failure=None, inner=None):
-    if not callable(success):
-        success, failure = thenable.unpack(success, failure)
+    if success is not None and not callable(success):
+        success, failure = klass._unpack(success, failure)
     if success is None and failure is None:
         return klass.deferred()
 
@@ -109,6 +104,13 @@ def thenable(klass, success=None, failure=None, inner=None):
 Future.thenable = classmethod(thenable)
 _thenable = thenable; thenable = Future.thenable
 
+def unpackThenable(klass, obj, failure=None):
+    success = getattr(obj, 'success', None) or getattr(obj, 'resolve', None)
+    if failure is None:
+        failure = getattr(obj, 'failure', None) or getattr(obj, 'reject', None)
+    return success, failure
+Future._unpack = classmethod(unpackThenable)
+
 def deferred(klass):
     actions = []
     inner = [None]
@@ -148,9 +150,6 @@ def resolved(klass, *args, **kw):
 Future.resolved = classmethod(resolved)
 _resolved = resolved; resolved = Future.resolved
 
-def _valueAsPromise(tgt): return Future.resolved(tgt).promise
-Promise._valueAsPromise = staticmethod(_valueAsPromise)
-
 def rejected(klass, *args, **kw):
     def then(success=None, failure=None):
         ans = klass.thenable(success, failure)
@@ -169,39 +168,53 @@ _inverted = inverted; inverted = Future.inverted
 
 
 #~ Compositions: any, all, every, first ~~~~~~~~~~~~~~~~~~~~
-"""
-function forEachPromise(anArray, thisArg, resolveFirst, rejectFirst, rejectAll) {
-  var n=0, future=deferred(thisArg), linchpin={
-    push: function(ea) {
-      if (isPromise(ea)) {
-        ++n; ea.then(linchpin)
-      } else if (resolveFirst)
-        future.resolve(anArray)
-      return ea },
-    resolve: function() {
-      if (resolveFirst || (--n < 1))
-        future.resolve(anArray) },
-    reject: function() {
-      if (rejectFirst || (--n < 1))
-        future.reject(anArray)
-      if (rejectAll)
-        future.resolve = future.reject } }
+def forEachPromise(iterable, step):
+    n = 0; i = itertools.count()
+    for ea in iterable:
+        n+=1
+        if not isPromise(tgt):
+            step(True, i.next(), n)
+        else: tgt.promise.then(
+            lambda *a,**k: step(True, i.next(), n),
+            lambda *a,**k: step(False, i.next(), n))
+    if n<0: step(True, 0, n)
 
-  ;[].forEach.call(anArray, linchpin.push)
-  if (n<1) future.resolve(n)
-  return future }
+def every(iterable):
+    future = deferred(); future.state = True
+    def step(state, i, n):
+        future.state = future.state and state
+        if i<n: return
+        elif future.state:
+            future.resolve((i,n))
+        else: future.reject((i,n))
+    forEachPromise(iterable, step)
+    return future.promise
+Future.every = Promise.every = classmethod(every)
 
-exports.every = Future.every = Promise.every = every
-function every(anArray, thisArg) {
-  return forEachPromise(anArray, thisArg, false, false, true) }
-exports.all = Future.all = Promise.all = all
-function all(anArray, thisArg) {
-  return forEachPromise(anArray, thisArg, false, true) }
-exports.first = Future.first = Promise.first = first
-function first(anArray, thisArg) {
-  return forEachPromise(anArray, thisArg, true, true) }
-exports.any = Future.any = Promise.any = any
-function any(anArray, thisArg) {
-  return forEachPromise(anArray, thisArg, true, false) }
+def all(iterable):
+    future = deferred()
+    def step(state, i, n):
+        if not state: future.reject((i,n))
+        elif i>=n: future.resolve((i,n))
+    forEachPromise(iterable, step)
+    return future.promise
+Future.all = Promise.all = classmethod(all)
 
-"""
+def first(iterable):
+    future = deferred()
+    def step(state, i, n):
+        if state: future.resolve((i,n))
+        else: future.reject((i,n))
+    forEachPromise(iterable, step)
+    return future.promise
+Future.first = Promise.first = classmethod(first)
+
+def any(iterable):
+    future = deferred()
+    def step(state, i, n):
+        if state: future.resolve((i,n))
+        elif i>=n: future.reject((i,n))
+    forEachPromise(iterable, step)
+    return future.promise
+Future.any = Promise.any = classmethod(any)
+
