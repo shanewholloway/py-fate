@@ -9,11 +9,14 @@
 """
 For futures and promises {then:, resolve:, reject:} must always be fully bound closures.
 """
+import itertools
+from functools import partial
 
 class PromiseApi(object):
     def always(self, fn): return self.then(fn, fn)
     def fail(self, failure): return self.then(None, failure)
     def done(self, success): return self.then(success, None)
+    def thenLog(self, **kw): return thenLog(self, **kw)
 
 def isPromise(tgt):
     return (tgt is not None and
@@ -166,6 +169,16 @@ def inverted(klass, tgt=None):
 Future.inverted = classmethod(inverted)
 _inverted = inverted; inverted = Future.inverted
 
+def thenLog(tgt, **kw):
+    if kw.get('showArgs', True):
+        def log(key,*a,**k):
+            key = kw.get(key, key)
+            if kw: print '%s: %r %r'  % (key,a,k)
+            else: print '%s: %r' % (key, a)
+    else:
+        def log(key): print kw.get(key, key)
+    tgt.promise.then(partial(log, 'success'), partial(log, 'failure'))
+    return tgt
 
 #~ Compositions: any, all, every, first ~~~~~~~~~~~~~~~~~~~~
 def forEachPromise(iterable, step):
