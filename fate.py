@@ -31,7 +31,7 @@ class Promise(PromiseApi):
     state = property(lambda self: self.then.state)
 
 def asPromise(tgt):
-    if tgt is None or getattr(klass,'promise',None) is None:
+    if tgt is None or getattr(tgt,'promise',None) is None:
         tgt = Future.resolved(tgt)
     return tgt.promise
 Promise.wrap = staticmethod(asPromise)
@@ -83,10 +83,8 @@ def thenable(klass, success=None, failure=None, inner=None):
                 if res is not None:
                     args = (res,); kw={}
             except Exception as err:
-                del success, failure
                 inner[0] = klass.rejected(err)
                 return tail.reject(err)
-        del success, failure
         inner[0] = klass.resolved(*args, **kw)
         return tail.resolve(*args, **kw)
     def reject(*args, **kw):
@@ -99,7 +97,6 @@ def thenable(klass, success=None, failure=None, inner=None):
                     args = (res,); kw={}
             except Exception as err:
                 args = (err,); kw={}
-        del success, failure
         inner[0] = klass.rejected(*args, **kw)
         return tail.reject(*args, **kw)
 
@@ -123,6 +120,7 @@ def deferred(klass):
             actions.append(f)
             return f.promise
         else: return inner[0].then(success, failure)
+    then.state = None
     def resolve(*args, **kw):
         then.state = True
         inner[0] = klass.resolved(*args, **kw)
@@ -130,7 +128,6 @@ def deferred(klass):
             try: ea.resolve(*args, **kw)
             except Exception as err:
                 klass.onActionError(err)
-        del actions
     def reject(*args, **kw):
         then.state = False
         inner[0] = klass.rejected(*args, **kw)
@@ -138,7 +135,6 @@ def deferred(klass):
             try: ea.reject(*args, **kw)
             except Exception as err:
                 klass.onActionError(err)
-        del actions
     return Future(then, resolve, reject)
 Future.deferred = classmethod(deferred)
 _deferred = deferred; deferred = Future.deferred
