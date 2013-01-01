@@ -65,9 +65,10 @@ Future.absentTail = Future(None)
 def thenable(klass, success=None, failure=None, inner=None):
     if success is not None and not callable(success):
         success, failure = klass._unpack(success, failure)
-    if success is None and failure is None:
+    success = filter(None, [success])
+    failure = filter(None, [failure])
+    if not (success or failure):
         return klass.deferred()
-
     inner = [inner]
     def then(success=None, failure=None):
         if inner[0] is None:
@@ -77,26 +78,29 @@ def thenable(klass, success=None, failure=None, inner=None):
     def resolve(*args, **kw):
         then.state = True
         tail = inner[0] or klass.absentTail
-        if success is not None:
+        if success:
             try:
-                res = success(*args, **kw)
+                res = success[0](*args, **kw)
                 if res is not None:
                     args = (res,); kw={}
             except Exception as err:
+                del success[:], failure[:]
                 inner[0] = klass.rejected(err)
                 return tail.reject(err)
+        del success[:], failure[:]
         inner[0] = klass.resolved(*args, **kw)
         return tail.resolve(*args, **kw)
     def reject(*args, **kw):
         then.state = False
         tail = inner[0] or klass.absentTail
-        if failure is not None:
+        if failure:
             try:
-                res = failure(*args, **kw)
+                res = failure[0](*args, **kw)
                 if res is not None:
                     args = (res,); kw={}
             except Exception as err:
                 args = (err,); kw={}
+        del success[:], failure[:]
         inner[0] = klass.rejected(*args, **kw)
         return tail.reject(*args, **kw)
 
@@ -112,8 +116,7 @@ def unpackThenable(klass, obj, failure=None):
 Future._unpack = classmethod(unpackThenable)
 
 def deferred(klass):
-    actions = []
-    inner = [None]
+    inner = [None]; actions = []
     def then(success=None, failure=None):
         if inner[0] is None:
             f = klass.thenable(success, failure)
@@ -128,6 +131,7 @@ def deferred(klass):
             try: ea.resolve(*args, **kw)
             except Exception as err:
                 klass.onActionError(err)
+        del actions[:]
     def reject(*args, **kw):
         then.state = False
         inner[0] = klass.rejected(*args, **kw)
@@ -135,6 +139,7 @@ def deferred(klass):
             try: ea.reject(*args, **kw)
             except Exception as err:
                 klass.onActionError(err)
+        del actions[:]
     return Future(then, resolve, reject)
 Future.deferred = classmethod(deferred)
 _deferred = deferred; deferred = Future.deferred
