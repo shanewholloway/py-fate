@@ -1,4 +1,5 @@
-bellite-python
-==============
+py-fate
+=======
 
-Python bindings for the Bellite.io library using JSON-RPC
+Fate is a small implementation of CommonJS Promises/A for Python
+
